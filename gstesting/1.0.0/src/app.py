@@ -37,7 +37,7 @@ class HelloWorld(AppBase):
         return message
 
     def repeat_back_to_me(self, call):
-        return "GS CALL {}".format(call)
+        return "GS1 CALL {}".format(call)
 
     def repeat_back_to_me_multi(self, call, call2, call3):
         return {"call1": call, "call2": call2, "call3": call3} 
