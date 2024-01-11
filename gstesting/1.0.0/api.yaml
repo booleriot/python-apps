@@ -1,6 +1,6 @@
 app_version: 1.0.0
 name: Gstesting
-description: Debugging app for Shuffle 
+description: 这个是一个测试程序
 tags:
   - Gstesting 
 categories:
