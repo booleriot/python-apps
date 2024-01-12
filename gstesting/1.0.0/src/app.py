@@ -24,7 +24,7 @@ class HelloWorld(AppBase):
         """
         super().__init__(redis, logger, console_logger)
 
-    def hello_world(self):
+    def gs_hello_world(self):
         """
         Returns Hello World from the hostname the action is run on
         :return: Hello World from your hostname
