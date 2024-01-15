@@ -23,7 +23,11 @@ class MySQL(AppBase):
         super().__init__(redis, logger, console_logger)
 
     # Write your data inside this function
-
+    def subcribe_msg(self, server, user, password):
+        response = {
+                    "message": f"server is {server}, user is {user} password is {password}"
+                }
+        return response
     def create_database(self, server, user, password, database, name, tables=None):
         try:
             conn = mysql.connector.connect(host=server, user=user, passwd=password)

@@ -1,0 +1,9 @@
+version: '3'
+services:
+  mqtt_app:
+    entrypoint: /bin/sh
+    stdin_open: true
+    tty: true
+    image: frikky/shuffle:mysql_1.0.0
+    volumes:
+        - .:/data
