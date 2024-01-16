@@ -3,429 +3,86 @@ import asyncio
 import json
 from urllib import response
 import itertools
-import mysql.connector
-from mysql.connector import errorcode
-
+import paho.mqtt.client as mqtt
+import time
+import logging
 from walkoff_app_sdk.app_base import AppBase
 
+class MQTTClient:
+    def __init__(self, broker_address, broker_port, username, password, client_id):
+        self.broker_address = broker_address
+        self.broker_port = broker_port
+        self.username = username
+        self.password = password
+        self.client_id = client_id
+        self.connect_success = False
+        self.msg = None
+    
+    def on_connect(self, client, userdata, flags, rc):
+        print("mqtt_client {} connected with result code {}".format(client, rc))
+        if rc == 0:
+            self.connect_success = True
+        else:
+            self.connect_success = False
 
-class MySQL(AppBase):
+    def on_message(self, client, userdata, msg):
+        print("mqtt_client {} received message on topic {}".format(client, msg.topic))
+        self.msg = msg
+    
+    def connect(self):
+        self.client = mqtt.Client(client_id=self.client_id)
+        self.client.on_connect = self.on_connect
+        self.client.on_message = self.on_message
+        self.client.username_pw_set(self.username, self.password)
+        self.client.connect(self.broker_address, self.broker_port, 60)
+        self.client.loop_start()
+    
+    def subscribe(self, topic):
+        self.client.subscribe(topic)
+    
+    def publish(self, topic, message):
+        json_msg = json.dumps(message)
+        reulst_msg = json_msg.encode("utf-8")
+        self.client.publish(topic, reulst_msg)
+
+
+class MQTT(AppBase):
     __version__ = "1.0.0"
-    app_name = "MySQL"  # this needs to match "name" in api.yaml
+    app_name = "MQTT"  # this needs to match "name" in api.yaml
 
     def __init__(self, redis, logger, console_logger=None):
-        """
-        Each app should have this __init__ to set up Redis and logging.
-        :param redis:
-        :param logger:
-        :param console_logger:
-        """
+        self.connect_success = False
+        self.msg = None
+        self.mqtt_client=None
         super().__init__(redis, logger, console_logger)
-
     # Write your data inside this function
-    def subcribe_msg(self, server, user, password):
+    def subcribe_msg(self, server, port, user, password,subtopic):
+        self.mqtt_client = MQTTClient(server, int(port), user, password, "walkoff")
+        self.mqtt_client.connect()
+        self.mqtt_client.subscribe(subtopic)
+        while self.mqtt_client.msg is None:
+            time.sleep(5)
         response = {
-                    "message": f"server is {server}, user is {user} password is {password}"
-                }
+                    "message": f"connect is {self.mqtt_client.connect_success}",
+                    "topic":self.mqtt_client.msg.topic,
+                    "payload":self.mqtt_client.msg.payload.decode("utf-8"),
+        }
+        
         return response
-    def create_database(self, server, user, password, database, name, tables=None):
-        try:
-            conn = mysql.connector.connect(host=server, user=user, passwd=password)
-            cursor = conn.cursor()
-        except Exception as err:
-            error = {"Error": "Couldn't import the data!"}
-            return error
-
-        # try to create the database
-        try:
-            cursor.execute(
-                f"CREATE DATABASE {name} CHARACTER SET = 'utf8' COLLATE = 'utf8_general_ci'"
-            )
-        except mysql.connector.Error as err:
-            error = {"Error": f"Failed creating database: {err}"}
-            return error
-
-        # Try to use the database, if it does not exist it creates
-        try:
-            cursor.execute(f"USE {name}")
-        except mysql.connector.Error as err:
-            print(f"Database {name} does not exists.")
-            if err.errno == errorcode.ER_BAD_DB_ERROR:
-                self.create_database(cursor)
-                print(f"Database {name} created successfully.")
-                conn.database = name
-            else:
-                error = {"Error": f"Couldn't use the database {name}: {err}"}
-                return err
-        else:
-            if tables:
-                if not isinstance(tables, list) and not isinstance(tables, dict):
-                    tables = json.loads(tables)
-
-                t_count = 0
-                for table_name in tables:
-                    table_description = tables[table_name]
-                    try:
-                        print(f"Creating table {table_name}: ", end="")
-                        cursor.execute(table_description)
-                        print(f"Table {table_name} created with success!")
-                        t_count += 1
-                    except mysql.connector.Error as err:
-                        if err.errno == errorcode.ER_TABLE_EXISTS_ERROR:
-                            print(f"Table {table_name} already exists.")
-                            error = {"Error": f"Table {table_name} already exists."}
-                            return error
-                        else:
-                            print(err.msg)
-                            error = {
-                                "Error": f"Couldn't create table {table_name}: {err.msg}"
-                            }
-                            return error
-
-                response = {
-                    "message": f"Database {name} and tables created with success!",
-                    "tables": tables,
-                }
-
-                return json.dumps(response, indent=4)
-            else:
-                return f"Database {name} created with success!"
-
-    # Create Tables
-    def create_tables(self, server, user, password, database, tables):
-        if not isinstance(tables, list) and not isinstance(tables, dict):
-            tables = json.loads(tables)
-
-        try:
-            conn = mysql.connector.connect(
-                host=server, user=user, passwd=password, db=database
-            )
-        except mysql.connector.Error as err:
-            if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-                print("Something is wrong with your user name or password")
-                error = {"Error": "Something is wrong with your user name or password"}
-                return error
-            elif err.errno == errorcode.ER_BAD_DB_ERROR:
-                print("Database does not exist")
-                error = {"Error": "Database does not exist"}
-                return error
-            else:
-                print(err)
-                error = {"Error": f"{err}"}
-                return error
-        else:
-            cursor = conn.cursor()
-            t_count = 0
-            for table_name in tables:
-                table_description = tables[table_name]
-                try:
-                    print(f"Creating table {table_name}: ", end="")
-                    cursor.execute(table_description)
-                    print("created with success!")
-                    t_count += 1
-                except mysql.connector.Error as err:
-                    if err.errno == errorcode.ER_TABLE_EXISTS_ERROR:
-                        print("already exists.")
-                        error = {"Error": f"Table {table_name} already exists."}
-                        return error
-                    else:
-                        print(err.msg)
-                        error = {"Error": f"{err.msg}"}
-                        return error
-            result = (
-                "Table(s) created with success!"
-                if t_count > 1
-                else "Table created with success!"
-            )
-            cursor.close()
-            conn.close()
-            return result
-
-    # Insert data into table
-    def insert_data(self, server, user, password, database, table, data):
-        if not isinstance(data, list) and not isinstance(data, dict):
-            data = json.loads(data)
-
-        try:
-            conn = mysql.connector.connect(
-                host=server, user=user, passwd=password, db=database
-            )
-        except mysql.connector.Error as err:
-            if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-                print("Something is wrong with your user name or password")
-                error = {"Error": "Something is wrong with your user name or password"}
-                return error
-            elif err.errno == errorcode.ER_BAD_DB_ERROR:
-                print("Database does not exist")
-                error = {"Error": "Database does not exist"}
-                return error
-            else:
-                print(err)
-                error = {"Error": f"{err}"}
-                return error
-        else:
-            cursor = conn.cursor()
-            if isinstance(data, list):
-                for row in data:
-                    fields = ""
-                    value_fields = ""
-
-                    if len([*row]) > 1:
-                        fields = ", ".join(row.keys())
-                        for i, key in enumerate(row.keys()):
-                            value_fields += (
-                                f"%({key})s, "
-                                if i != len(row.keys()) - 1
-                                else f"%({key})s"
-                            )
-                    else:
-                        fields = next(iter(row.keys()))
-
-                    sql = (
-                        "INSERT INTO `"
-                        + table
-                        + "` ("
-                        + fields
-                        + ") VALUES ("
-                        + value_fields
-                        + ")"
-                    )
-
-                    try:
-                        print(f"Inserting data into {table}: ", end="")
-                        cursor.execute(sql, row)
-                        print("inserted with success!")
-                        conn.commit()
-                    except mysql.connector.Error as err:
-                        print(err)
-                        error = {"Error": f"{err}"}
-                        return error
-            else:
-                fields = ""
-                value_fields = ""
-
-                if len([*data]) > 1:
-                    fields = ", ".join(data.keys())
-                    for i, key in enumerate(data.keys()):
-                        value_fields += (
-                            f"%({key})s, "
-                            if i != len(data.keys()) - 1
-                            else f"%({key})s"
-                        )
-                else:
-                    fields = next(iter(data.keys()))
-
-                sql = (
-                    "INSERT INTO `"
-                    + table
-                    + "` ("
-                    + fields
-                    + ") VALUES ("
-                    + value_fields
-                    + ")"
-                )
-
-                try:
-                    print(f"Inserting data into {table}: ", end="")
-                    cursor.execute(sql, data)
-                    print("inserted with success!")
-                    conn.commit()
-                except mysql.connector.Error as err:
-                    print(err)
-                    error = {"Error": f"{err}"}
-                    return error
-
-            cursor.close()
-            conn.close()
-            response = {
-                "message": f"Data inserted with success into table {table}!",
-                "data": data,
-            }
-
-            return json.dumps(response, indent=4)
-
-    # Query Data
-    def query_data(
-        self, server, user, password, database, table, fields=None, condition=None
-    ):
-        query = f"SELECT {fields} FROM {table}" if fields else f"SELECT * FROM {table}"
-        if condition:
-            query += f" WHERE {condition}"
-
-        try:
-            conn = mysql.connector.connect(
-                host=server, user=user, passwd=password, db=database
-            )
-            cursor = conn.cursor()
-        except mysql.connector.Error as err:
-            if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-                print("Something is wrong with your user name or password")
-                return "Something is wrong with your user name or password"
-            elif err.errno == errorcode.ER_BAD_DB_ERROR:
-                print("Database does not exist")
-                return "Database does not exist"
-            else:
-                print(err)
-                return err
-
-        cursor.execute(query)
-        row_headers = [x[0] for x in cursor.description]
-        json_data = []
-        for result in cursor.fetchall():
-            json_data.append(dict(zip(row_headers, result)))
-        result = cursor
-        cursor.close()
-        conn.close()
-        return json.dumps(json_data, indent=4)
-   
-    #update data    
-    def update_data(self, server, user, password, database, table, fields=None, condition=None, data_value=None
-    ):
-        q = f"SELECT * from {table}"
-        if condition:
-            q += f" WHERE {condition}"
-        query = f"UPDATE {table} SET "
-        for (key,value) in zip(fields,data_value):
-            query += f"{key} = '{value}',"
-        
-        query = query[:-1]
-        if condition:
-            query += f" WHERE {condition}"
-        
-        try:
-            conn = mysql.connector.connect(
-                host=server, user=user, passwd=password, db=database
-            )
-            cursor = conn.cursor()
-            cursor.execute(q)
-            rs = cursor.fetchone()
-            if rs == None:
-                cursor.close()
-                return f"data not found"
-            else:
-                cursor1 = conn.cursor()
-                cursor1.execute(query)
-                conn.commit()
-                cursor1.close()
-                conn.close()
-                response = {
-                    "message": f"Data updated with success {table}!",
-                    "data": query,}
-                return json.dumps(response, indent=4)
-                
-        except mysql.connector.Error as err:
-            if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-                print("Something is wrong with your user name or password")
-                return "Something is wrong with your user name or password"
-            elif err.errno == errorcode.ER_BAD_DB_ERROR:
-                print("Database does not exist")
-                return "Database does not exist"
-            else:
-                print(err)
-                return err
-
-    # delete data 
-    def delete_data(self, server, user, password, database, table, fields=None, condition=None
-    ):
-        
-        q = f"SELECT * from {table}"
-        if condition:
-            q += f" WHERE {condition}"
-        query = f"DELETE FROM {table}" 
-        if condition:
-            query += f" WHERE {condition}"
-        try:
-            conn = mysql.connector.connect(
-                host=server, user=user, passwd=password, db=database
-            )
-            cursor = conn.cursor()
-            cursor.execute(q)
-            rs = cursor.fetchone()
-            if rs == None:
-                cursor.close()
-                return f"data not found"
-            else:
-                cursor1 = conn.cursor()
-                cursor1.execute(query)
-                conn.commit()
-                cursor1.close()
-                conn.close()
-                response = {
-                    "message": f"Data deleted with success {table}!",
-                    "data": query,}
-                return json.dumps(response, indent=4)
-
-        except mysql.connector.Error as err:
-            if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-                print("Something is wrong with your user name or password")
-                return "Something is wrong with your user name or password"
-            elif err.errno == errorcode.ER_BAD_DB_ERROR:
-                print("Database does not exist")
-                return "Database does not exist"
-            else:
-                print(err)
-                return err
-
-    # join 
-    def join(self, type, server, user, password, database, fields=None
-    ):
-        try:
-            conn = mysql.connector.connect(
-                host=server, user=user, passwd=password, db=database
-            )
-            cursor = conn.cursor()
-        except mysql.connector.Error as err:
-            if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-                print("Something is wrong with your user name or password")
-                return "Something is wrong with your user name or password"
-            elif err.errno == errorcode.ER_BAD_DB_ERROR:
-                print("Database does not exist")
-                return "Database does not exist"
-            else:
-                print(err)
-                return err
-        if type == "INNER JOIN":
-            cursor.execute(fields)
-            row_headers = [x[0] for x in cursor.description]
-            json_data = []
-            for result in cursor.fetchall():
-                json_data.append(dict(zip(row_headers, result)))
-            result = cursor
-            cursor.close()
-            conn.close()
-            return json.dumps(json_data, indent=4)
-        elif type == "LEFT JOIN":
-            cursor.execute(fields)
-            row_headers = [x[0] for x in cursor.description]
-            json_data = []
-            for result in cursor.fetchall():
-                json_data.append(dict(zip(row_headers, result)))
-            result = cursor
-            cursor.close()
-            conn.close()
-            return json.dumps(json_data, indent=4)
-        elif type == "RIGHT JOIN":
-            cursor.execute(fields)
-            row_headers = [x[0] for x in cursor.description]
-            json_data = []
-            for result in cursor.fetchall():
-                json_data.append(dict(zip(row_headers, result)))
-            result = cursor
-            cursor.close()
-            conn.close()
-            return json.dumps(json_data, indent=4)
-        elif type == "CROSS JOIN":
-            cursor.execute(fields)
-            row_headers = [x[0] for x in cursor.description]
-            json_data = []
-            for result in cursor.fetchall():
-                json_data.append(dict(zip(row_headers, result)))
-            result = cursor
-            cursor.close()
-            conn.close()
-            return json.dumps(json_data, indent=4)
-        else:
-                return f"Select join"
+    
+    def send_msg(self, server, port, user, password,sendtopic, sendmsg):
+        self.mqtt_client = MQTTClient(server, int(port), user, password, "walkoff")
+        self.mqtt_client.connect()
+        while self.mqtt_client.connect_success is False:
+            time.sleep(2)
+        self.mqtt_client.publish(sendtopic, sendmsg)
+        response = {
+                    "message": f"connect is {self.mqtt_client.connect_success}",
+                    "topic":sendtopic,
+                    "payload":sendmsg
+        }
+        return response
+    
 
 if __name__ == "__main__":
-    MySQL.run()
+    MQTT.run()
