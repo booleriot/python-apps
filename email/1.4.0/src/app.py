@@ -29,12 +29,6 @@ def json_serial(obj):
         return serial
 
 def default(o):
-    """helpers to store item in json
-    arguments:
-    - o: field of the object to serialize
-    returns:
-    - valid serialized value for unserializable fields
-    """
     if isinstance(o, (datetime.date, datetime.datetime)):
         return o.isoformat()
     if isinstance(o, set):
@@ -48,7 +42,7 @@ def default(o):
 
 
 class Email(AppBase):
-    __version__ = "1.3.0"
+    __version__ = "1.4.0"
     app_name = "email"
 
     def __init__(self, redis, logger, console_logger=None):
@@ -60,19 +54,6 @@ class Email(AppBase):
         """
         super().__init__(redis, logger, console_logger)
 
-    # This is an email function of Shuffle
-    def send_email_shuffle(self, apikey, recipients, subject, body):
-        targets = [recipients]
-        if ", " in recipients:
-            targets = recipients.split(", ")
-        elif "," in recipients:
-            targets = recipients.split(",")
-
-        data = {"targets": targets, "body": body, "subject": subject, "type": "alert"}
-
-        url = "https://shuffler.io/functions/sendmail"
-        headers = {"Authorization": "Bearer %s" % apikey}
-        return requests.post(url, headers=headers, json=data).text
     def send_email_smtp(
         self, smtp_host, recipient, subject, body, smtp_port, attachments="", username="", password="", ssl_verify="True", body_type="html"
     ):
